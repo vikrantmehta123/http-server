@@ -1,6 +1,7 @@
 import socket
 import uuid
 import logging
+import threading
 
 # Setup the Logger
 logger = logging.getLogger(__name__)
@@ -29,15 +30,24 @@ class TCPServer:
 
             logger.info(f"Connected by : {addr}")
 
+            threading.Thread(target=self.handle_client, args=(conn, addr)).start()
+
+    def handle_client(self, conn, addr):
+        """Handle the client request in a new thread."""
+        try:
             # read the data sent by the client (Only first 2048 bytes are read)
             data = conn.recv(2048)
-            logger.info(f"Request received from {addr}: {data.decode()}" )
+            logger.info(f"Request received from {addr}: {data.decode()}")
 
+            # Process the request
             response = self.handle_request(data)
 
-            logger.info(f"Response Sent: {response.decode()}")
-
+            # Send response
             conn.sendall(response)
+            logger.info(f"Response sent to {addr}: {response.decode()}")
+
+        finally:
+            # Close the connection once the request is handled
             conn.close()
 
     def handle_request(self, data):
