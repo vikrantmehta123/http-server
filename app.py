@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(filename='serverlog.log', encoding='utf-8', level=logging.DEBUG)
 logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
 
+# Setup the TCP Server: the base class for our HTTP Server
 class TCPServer:
     def __init__(self, port=8080) -> None:
         self.host = "127.0.0.1"
@@ -30,7 +31,7 @@ class TCPServer:
 
             # read the data sent by the client (Only first 2048 bytes are read)
             data = conn.recv(2048)
-            logger.info(f"Request received: {data.decode()}" )
+            logger.info(f"Request received from {addr}: {data.decode()}" )
 
             response = self.handle_request(data)
 
@@ -40,9 +41,11 @@ class TCPServer:
             conn.close()
 
     def handle_request(self, data):
+        """Implementation handled by the child class"""
         pass
 
 class HTTPRequest:
+    """Class for the HTTP Requests"""
     def __init__(self, data):
         self.method = None
         self.uri = None
@@ -55,6 +58,7 @@ class HTTPRequest:
         self.parse(data)
     
     def parse(self, data:str):
+        """Given an HTTP text request, parse the method, uri, headers and body of the request."""
         lines = data.split("\r\n")
 
         request_line = lines[0]
@@ -73,6 +77,7 @@ class HTTPRequest:
         in_headers = True
         
         for line in lines[1:]:
+            # Headers and body are separated by blank line. Check for it
             if line == '':
                 in_headers = False
             elif in_headers:
@@ -85,6 +90,7 @@ class HTTPRequest:
         return
     
     def extract_post_data(self, body:str):
+        """We assume that the form is being submitted as type: application/json"""
         import json
         form = json.loads(body)
         logger.info(f"Form received: {form}")
@@ -94,7 +100,8 @@ class Router:
     def __init__(self) -> None:
         self.routes = {}
 
-    def add_route(self, method, path, handler):
+    def add_route(self, method:str, path:str, handler:function):
+        """Adds the route, path, and maps it with its handler function"""
         self.routes[(method, path)] = handler
 
 class HTTPResponse:
@@ -113,12 +120,18 @@ class HTTPResponse:
         self.response_body = self.create_response_body(body=body)
     
     def create_response_line(self, status_code):
-        """Returns response line"""
-        reason = self.status_codes[status_code]
-        line = "HTTP/1.1 %s %s\r\n" % (status_code, reason)
+        """Returns response line-> always a single line with specific format"""
+        try:
+            reason = self.status_codes[status_code]
+            line = "HTTP/1.1 %s %s\r\n" % (status_code, reason)
+        except KeyError:
+            status_code = 400
+            reason = self.status_codes[status_code]
+            line = "HTTP/1.1 %s %s\r\n" % (status_code, reason)
         return line
     
     def create_response_headers(self, extra_headers=None, body=''):
+        """Create the headers to be sent back to the client as a part of the response"""
         headers = {
             'Server': socket.gethostname()
         }
@@ -138,7 +151,8 @@ class HTTPResponse:
     def create_response_body(self, body):
         return body
 
-    def to_http(self) -> str:
+    def to_http(self):
+        """Concatenate the strings and encode them in bytes since we need to send bytes and not strings"""
         response_line = self.response_line.encode()
         response_headers = self.response_headers.encode()
         blank_line = b"\r\n"
@@ -149,7 +163,7 @@ class HTTPServer(TCPServer):
     def __init__(self, port=8080) -> None:
         super().__init__(port)
         self.router = Router()
-        self.SESSIONS = {}
+        self.SESSIONS = {} # To record login information
 
     def handle_request(self, data):
         request = self.create_request(data.decode())
@@ -157,11 +171,16 @@ class HTTPServer(TCPServer):
         return response.to_http()
 
     def create_request(self, data):
+        """Convert the incoming data into an HTTP Request instance"""
         request = HTTPRequest(data)
         return request
     
     def create_response(self, request:HTTPRequest) -> HTTPResponse:
-        handler = self.router.routes[(request.method, request.uri)]
+        """Using the request, call the handler method"""
+        try:
+            handler = self.router.routes[(request.method, request.uri)]
+        except KeyError:
+            HTTPResponse(400)
         if not handler:
             response = HTTPResponse(404)
         else:
@@ -169,15 +188,19 @@ class HTTPServer(TCPServer):
         return response
     
     def create_session(self, username):
+        """Create a session for the user. Used when the user logs in"""
         session_id = str(uuid.uuid4())
         self.SESSIONS[username] = session_id
         return session_id
         
     def delete_session(self, username):
+        """Deletes the user session- when the user logs out. He / she will need to sign in again."""
         if username in self.SESSIONS:
             del self.SESSIONS[username]
 
     def handle_login(self, request:HTTPRequest) -> HTTPResponse:
+        """Handler for the login endpoint"""
+        # Error checking 
         if request.method != "POST":
             return HTTPResponse(405, body="The method you tried is not allowed on this endpoint")
 
@@ -189,18 +212,20 @@ class HTTPServer(TCPServer):
         if 'username' not in form:
             return HTTPResponse(400, body='Username not found')
         
+        # If request is valid, create a session for the user, and return the cookie as a part of the response.
         username = form['username']
         session_id = self.create_session(username)
         
         extra_headers = { 
             'Set-Cookie': f"session_id={session_id};username={username}"
         }
-
-        logger.info(f"After login: {self.SESSIONS}")
         response = HTTPResponse(200, extra_headers=extra_headers, body="Login Successful")
         return response
     
     def handle_logout(self, request:HTTPRequest) -> HTTPResponse:
+        """Handler for the logout endpoint"""
+
+        # Error checking
         if request.method != "POST":
             return HTTPResponse(405, body="The method you tried is not allowed on this endpoint")
 
@@ -208,6 +233,7 @@ class HTTPServer(TCPServer):
         if 'Cookie' not in request.headers:
             return HTTPResponse(400, body="You need to login before logging out!")
         
+        # Extract data from cookie
         cookies = request.headers['Cookie']
         for cookie in cookies.split(';'):
                 if 'session_id' in cookie:
@@ -215,20 +241,24 @@ class HTTPServer(TCPServer):
                 if 'username' in cookie:
                     username = cookie.split('=')[1]
         
+        # Delete the user's session- mark him / her as logged out
         if session_id:
             self.delete_session(username)
-            logger.info(f"After logout: {self.SESSIONS}")
             return HTTPResponse(200, body="Logout successful!")
-
         else:
             return HTTPResponse(400, body="You need to login before logging out!")
         
     def handle_protected_resource(self, request:HTTPRequest) -> HTTPResponse:
+        """Handler for the protected endpoint"""
+
+        # Error checking
         if request.method != "GET":
             return HTTPResponse(405, body="The method you tried is not allowed on this endpoint")
 
         if 'Cookie' not in request.headers:
             return HTTPResponse(401)
+        
+        # Extract session info from cookies
         session_id = None
         username = None
         cookies = request.headers['Cookie']
@@ -238,7 +268,7 @@ class HTTPServer(TCPServer):
                 if 'username' in cookie:
                     username = cookie.split('=')[1]
             
-
+        # If the user is logged in, allow him to access the resource. Else return unauthorized
         if not session_id or username not in self.SESSIONS or self.SESSIONS[username] != session_id:
             return HTTPResponse(401)
         

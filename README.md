@@ -19,9 +19,8 @@ This project is a basic implementation of an HTTP server from scratch. It suppor
   - `405 Method Not Allowed`
   - `400 Bad Request`
 
-## Getting Started
+## Credits
 
-### Prerequisites
-
-- Python 3.x
-- Basic knowledge of HTTP and Python programming
+1. [Bharat Chauhan Blog](https://bhch.github.io/posts/2017/11/writing-an-http-server-from-scratch/)
+  - A great resource to get started and build upon
+  
