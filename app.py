@@ -2,6 +2,9 @@ import socket
 import uuid
 import logging
 import threading
+import base64
+import hashlib
+import hmac
 
 # Setup the Logger
 logger = logging.getLogger(__name__)
@@ -172,12 +175,230 @@ class HTTPResponse:
         blank_line = b"\r\n"
         response_body = self.response_body.encode()
         return b"".join([response_line, response_headers, blank_line, response_body])
+    
+class SessionManager:
+    """
+    Class to manage user sessions.
+    
+    This class allows for the creation, deletion, and verification of user sessions, 
+    typically used when a user logs in and logs out.
+    """
+    
+    def __init__(self) -> None:
+        """
+        Initializes the session manager with an empty dictionary to store session data.
+        """
+        self.SESSIONS = {}  # Dictionary to store sessions for each user
+
+    def create_session(self, username: str) -> str:
+        """
+        Creates a new session for the specified user.
+        
+        Args:
+            username (str): The username of the user logging in.
+        
+        Returns:
+            str: The generated session ID for the user.
+        """
+        # Generate a unique session ID using UUID
+        session_id = str(uuid.uuid4())
+        
+        # Store the session ID for the user in the SESSIONS dictionary
+        self.SESSIONS[username] = session_id
+        
+        # Return the session ID
+        return session_id
+        
+    def delete_session(self, username: str) -> None:
+        """
+        Deletes the session for the specified user.
+        
+        This is typically used when the user logs out and will require logging in again.
+        
+        Args:
+            username (str): The username of the user logging out.
+        """
+        # Check if the user has a session and remove it
+        if username in self.SESSIONS:
+            del self.SESSIONS[username]
+
+    def exists(self, username: str, session_id: str = None) -> bool:
+        """
+        Checks whether the user is already logged in.
+        
+        Optionally, the session ID can be provided to check if a specific session exists for the user.
+        
+        Args:
+            username (str): The username of the user to check.
+            session_id (str, optional): The session ID to verify, if needed.
+        
+        Returns:
+            bool: True if the user is logged in and the session ID (if provided) matches; False otherwise.
+        """
+        # If the user is not in the session list, return False
+        if username not in self.SESSIONS:
+            return False
+        
+        # If a session ID is provided, check if it matches the stored session ID
+        if session_id and self.SESSIONS[username] != session_id:
+            return False
+        
+        # If no session ID is provided or it matches, return True
+        return True
+
+
+class TokenManager:
+    """
+    A class to manage tokens using HMAC-SHA256 for signing and verifying tokens.
+    """
+    
+    def __init__(self) -> None:
+        """
+        Initializes the TokenManager with the specified algorithm and an empty dictionary
+        to store tokens. Uses HMAC-SHA256 as the hashing algorithm.
+        """
+        self.algorithm = 'HMAC-SHA256'
+        self.TOKENS = {}  # Dictionary to store tokens for users
+
+    def create_signature(self, header: str, payload: str, secret_key: str) -> str:
+        """
+        Creates an HMAC-SHA256 signature for a given header, payload, and secret key.
+        
+        Args:
+            header (str): The token header in string form.
+            payload (str): The token payload in string form.
+            secret_key (str): The secret key used to sign the token.
+
+        Returns:
+            str: The generated signature.
+        """
+        # Ensure inputs are in bytes
+        if not isinstance(header, bytes):
+            header = header.encode('utf-8')
+        if not isinstance(secret_key, bytes):
+            secret_key = secret_key.encode('utf-8')
+        if not isinstance(payload, bytes):
+            payload = payload.encode('utf-8')
+
+        # Concatenate header and payload
+        concat = f"{header}.{payload}"
+
+        # Create the HMAC-SHA256 signature
+        signature = hmac.new(secret_key, concat.encode('utf-8'), hashlib.sha256)
+
+        # Return the signature in hexadecimal format
+        return signature.hexdigest()
+
+    def create_token(self, header: str, payload: str, secret_key: str) -> bytes:
+        """
+        Creates a token consisting of a header, payload, and HMAC-SHA256 signature.
+        
+        Args:
+            header (str): The token header.
+            payload (str): The token payload.
+            secret_key (str): The secret key used to sign the token.
+        
+        Returns:
+            bytes: The encoded token.
+        """
+        # Generate the signature
+        signature = self.create_signature(header, payload, secret_key)
+
+        # Combine header, payload, and signature into a single token string
+        token = f"{header}.{payload}.{signature}"
+
+        # Encode the token
+        return self.encode_token(token)
+
+    def encode_token(self, token: str) -> bytes:
+        """
+        Encodes the token using Base64 encoding.
+        
+        Args:
+            token (str): The token to be encoded.
+        
+        Returns:
+            bytes: The Base64-encoded token.
+        """
+        return base64.b64encode(token.encode('utf-8'))
+
+    def decode_token(self, token: bytes) -> str:
+        """
+        Decodes the Base64-encoded token back into its original string format.
+        
+        Args:
+            token (bytes): The Base64-encoded token.
+        
+        Returns:
+            str: The decoded token as a string.
+        """
+        return base64.b64decode(token).decode('utf-8')
+
+    def verify_identity(self, token: bytes) -> bool:
+        """
+        Verifies the identity by checking if the token is valid.
+        
+        Args:
+            token (bytes): The Base64-encoded token to verify.
+        
+        Returns:
+            bool: True if the token is valid, False otherwise.
+        """
+        # Decode the token
+        token = self.decode_token(token)
+
+        # Split the token into header, payload, and signature
+        header, payload, signature = token.split(".")
+
+        # Verify the signature
+        return self.verify_signature(header, payload, signature)
+
+    def verify_signature(self, header: str, payload: str, actual_signature: str) -> bool:
+        """
+        Verifies if the actual signature matches the expected signature for the given header and payload.
+        
+        Args:
+            header (str): The token header.
+            payload (str): The token payload.
+            actual_signature (str): The actual signature provided with the token.
+        
+        Returns:
+            bool: True if the signatures match, False otherwise.
+        """
+        # Recreate the expected signature based on the header and payload
+        expected_signature = self.create_signature(header, payload, actual_signature)
+
+        # Compare the actual signature with the expected signature
+        return expected_signature == actual_signature
+
+    def add_token(self, username: str, token: bytes) -> None:
+        """
+        Adds a token to the user's token storage.
+        
+        Args:
+            username (str): The username to associate with the token.
+            token (bytes): The token to store.
+        """
+        self.TOKENS[username] = token
+
+    def delete_token(self, username: str) -> None:
+        """
+        Deletes a token associated with the given username.
+        
+        Args:
+            username (str): The username whose token should be deleted.
+        """
+        if username in self.TOKENS:
+            del self.TOKENS[username]
+
 
 class HTTPServer(TCPServer):
-    def __init__(self, port=8080) -> None:
+    def __init__(self, port=8080, session_manager=None, token_manager=None, secret_key=None) -> None:
         super().__init__(port)
         self.router = Router()
-        self.SESSIONS = {} # To record login information
+        self.session_manager = SessionManager()
+        self.SECRET_KEY = "my-secret-key"
+        self.token_manager = TokenManager()
 
     def handle_request(self, data):
         request = self.create_request(data.decode())
@@ -200,17 +421,6 @@ class HTTPServer(TCPServer):
         else:
             response = handler(request)
         return response
-    
-    def create_session(self, username):
-        """Create a session for the user. Used when the user logs in"""
-        session_id = str(uuid.uuid4())
-        self.SESSIONS[username] = session_id
-        return session_id
-        
-    def delete_session(self, username):
-        """Deletes the user session- when the user logs out. He / she will need to sign in again."""
-        if username in self.SESSIONS:
-            del self.SESSIONS[username]
 
     def handle_login(self, request:HTTPRequest) -> HTTPResponse:
         """Handler for the login endpoint"""
@@ -228,7 +438,7 @@ class HTTPServer(TCPServer):
         
         # If request is valid, create a session for the user, and return the cookie as a part of the response.
         username = form['username']
-        session_id = self.create_session(username)
+        session_id = self.session_manager.create_session(username)
         
         extra_headers = { 
             'Set-Cookie': f"session_id={session_id};username={username}"
@@ -257,7 +467,7 @@ class HTTPServer(TCPServer):
         
         # Delete the user's session- mark him / her as logged out
         if session_id:
-            self.delete_session(username)
+            self.session_manager.delete_session(username)
             return HTTPResponse(200, body="Logout successful!")
         else:
             return HTTPResponse(400, body="You need to login before logging out!")
@@ -283,7 +493,7 @@ class HTTPServer(TCPServer):
                     username = cookie.split('=')[1]
             
         # If the user is logged in, allow him to access the resource. Else return unauthorized
-        if not session_id or username not in self.SESSIONS or self.SESSIONS[username] != session_id:
+        if not session_id or self.session_manager.exists(username, session_id):
             return HTTPResponse(401)
         
         return HTTPResponse(200, body="You are accessing a protected resource")
