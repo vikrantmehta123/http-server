@@ -240,12 +240,14 @@ class SessionManager:
             return False
         
         # If a session ID is provided, check if it matches the stored session ID
-        if session_id and self.SESSIONS[username] != session_id:
+        if not session_id:
+            return False
+
+        if self.SESSIONS[username] != session_id:
             return False
         
         # If no session ID is provided or it matches, return True
         return True
-
 
 class TokenManager:
     """
@@ -393,12 +395,28 @@ class TokenManager:
 
 
 class HTTPServer(TCPServer):
-    def __init__(self, port=8080, session_manager=None, token_manager=None, secret_key=None) -> None:
+    registered_routes = [ ]
+    def __init__(self, port=8080) -> None:
         super().__init__(port)
         self.router = Router()
         self.session_manager = SessionManager()
         self.SECRET_KEY = "my-secret-key"
         self.token_manager = TokenManager()
+        
+    # TODO: the following two functions are now decorators for your app
+    def add_route(self, methods, path):
+        """Decorator for adding routes."""
+        def decorator(func):
+            for method in methods:
+                HTTPServer.registered_routes.append((method, path, func))
+            return func
+        return decorator
+
+    # TODO: A decorator for your apps
+    def register_routes(self):
+        """Register all collected routes before starting the server."""
+        for method, path, handler in HTTPServer.registered_routes:
+            self.router.add_route(method, path, handler)
 
     def handle_request(self, data):
         request = self.create_request(data.decode())
@@ -493,12 +511,12 @@ class HTTPServer(TCPServer):
                     username = cookie.split('=')[1]
             
         # If the user is logged in, allow him to access the resource. Else return unauthorized
-        if not session_id or self.session_manager.exists(username, session_id):
+        if not session_id or not self.session_manager.exists(username, session_id):
             return HTTPResponse(401)
         
         return HTTPResponse(200, body="You are accessing a protected resource")
-        
-    
+
+
 if __name__ == '__main__':
     server = HTTPServer()
     server.router.add_route("POST", "/login", server.handle_login)
