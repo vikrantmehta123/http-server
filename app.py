@@ -30,7 +30,11 @@ class TCPServer:
 
             logger.info(f"Connected by : {addr}")
 
-            threading.Thread(target=self.handle_client, args=(conn, addr)).start()
+            thread = threading.Thread(target=self.handle_client, args=(conn, addr))
+            logger.info(f"Being handled by the thread: {thread.native_id}, {thread.name}")
+            thread.start()
+
+            
 
     def handle_client(self, conn, addr):
         """Handle the client request in a new thread."""
@@ -110,7 +114,7 @@ class Router:
     def __init__(self) -> None:
         self.routes = {}
 
-    def add_route(self, method:str, path:str, handler:function):
+    def add_route(self, method:str, path:str, handler:classmethod):
         """Adds the route, path, and maps it with its handler function"""
         self.routes[(method, path)] = handler
 
