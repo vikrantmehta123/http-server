@@ -66,10 +66,8 @@ class TestMultithreading(unittest.TestCase):
 
     def make_protected_request(self, index):
         """Simulates a request to a protected resource"""
-        print(f"Sending request {index}")
         headers = {}
         res = requests.get("http://127.0.0.1:8080/protected", headers=headers)
-        print(f"Response {index} received: {res.status_code}")
 
     def test_multithreading(self):
         """Test if server handles multiple requests concurrently"""

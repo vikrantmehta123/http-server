@@ -11,55 +11,95 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(filename='serverlog.log', encoding='utf-8', level=logging.DEBUG)
 logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p')
 
-# Setup the TCP Server: the base class for our HTTP Server
 class TCPServer:
+    """
+    A base class for creating a TCP server that listens for client connections and handles requests.
+    This server uses multithreading to handle multiple clients concurrently.
+
+    Attributes:
+        host (str): The IP address where the server will listen (default is localhost).
+        port (int): The port on which the server will listen (default is 8080).
+    """
+
     def __init__(self, port=8080) -> None:
-        self.host = "127.0.0.1"
-        self.port = port
+        """
+        Initializes the TCPServer instance with a specific port.
+        
+        Args:
+            port (int): The port number for the server to listen on (default is 8080).
+        """
+        self.host = "127.0.0.1"  # Server will bind to localhost by default
+        self.port = port  # Port the server will listen on
 
     def start(self):
-
-        # Setup the server  
+        """
+        Starts the TCP server, binds to the specified host and port, and listens for incoming connections.
+        Each client is handled in a new thread.
+        """
+        # Create a new socket using IPv4 (AF_INET) and TCP (SOCK_STREAM)
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        
+        # Bind the socket to the provided host and port
         s.bind((self.host, self.port))
+        
+        # Start listening for incoming connections with a backlog of 5
         s.listen(5)
 
+        # Get the socket's information and log it
         socketname = s.getsockname()
         logger.info(f"Server listening on: {socketname}")
 
         while True:
-            # accept any new connection
+            # Accept a new connection (blocking call)
             conn, addr = s.accept()
-
             logger.info(f"Connected by : {addr}")
 
+            # Handle each connection in a new thread
             thread = threading.Thread(target=self.handle_client, args=(conn, addr))
-            logger.info(f"Being handled by the thread: {thread.native_id}, {thread.name}")
+            logger.info(f"Being handled by thread: {thread.native_id}, {thread.name}")
             thread.start()
 
-            
-
     def handle_client(self, conn, addr):
-        """Handle the client request in a new thread."""
+        """
+        Handles the client request in a separate thread.
+        Reads data from the client, processes the request, and sends back a response.
+        
+        Args:
+            conn (socket): The socket object representing the client connection.
+            addr (tuple): The address of the connected client (IP, port).
+        """
         try:
-            # read the data sent by the client (Only first 2048 bytes are read)
+            # Read data from the client (up to 2048 bytes)
             data = conn.recv(2048)
             logger.info(f"Request received from {addr}: {data.decode()}")
 
-            # Process the request
+            # Process the client request and generate a response
             response = self.handle_request(data)
 
-            # Send response
+            # Send the response back to the client
             conn.sendall(response)
             logger.info(f"Response sent to {addr}: {response.decode()}")
 
         finally:
-            # Close the connection once the request is handled
+            # Close the connection after processing the request
             conn.close()
 
     def handle_request(self, data):
-        """Implementation handled by the child class"""
-        pass
+        """
+        Processes the incoming request data. This method is intended to be 
+        implemented by subclasses to handle specific protocols (e.g., HTTP).
+        
+        Args:
+            data (bytes): The raw data received from the client.
+        
+        Returns:
+            bytes: The response data to be sent back to the client.
+        
+        Note:
+            This method must be implemented in the subclass to define the 
+            behavior of the server (e.g., handling HTTP requests).
+        """
+        raise NotImplementedError("Subclasses must implement this method to handle client requests.")
 
 class HTTPRequest:
     """Class for the HTTP Requests"""
@@ -114,66 +154,144 @@ class HTTPRequest:
         return form
 
 class Router:
-    def __init__(self) -> None:
-        self.routes = {}
+    """
+    A simple Router class that maps HTTP methods and paths to handler functions.
+    
+    Attributes:
+        routes (dict): A dictionary that stores routes, where keys are tuples of (method, path),
+                       and values are handler functions for processing those routes.
+    """
 
-    def add_route(self, method:str, path:str, handler:classmethod):
-        """Adds the route, path, and maps it with its handler function"""
+    def __init__(self) -> None:
+        """
+        Initializes the Router instance with an empty dictionary for routes.
+        """
+        self.routes = {}  # Dictionary to store routes
+
+    def add_route(self, method: str, path: str, handler: classmethod):
+        """
+        Adds a route to the router by mapping an HTTP method and path to a handler function.
+        
+        Args:
+            method (str): The HTTP method for the route (e.g., "GET", "POST").
+            path (str): The path for the route (e.g., "/home", "/about").
+            handler (classmethod): The handler function that will process requests for this route.
+        """
+        # Add the route to the dictionary
         self.routes[(method, path)] = handler
 
 class HTTPResponse:
+    """
+    A class to generate HTTP responses with status codes, headers, and body.
+    
+    Attributes:
+        status_codes (dict): A dictionary mapping HTTP status codes to their reason phrases.
+    """
+
     status_codes = {
-        200 : "OK", 
-        404 : "Not Found",
+        200: "OK", 
+        404: "Not Found",
         500: "Internal Server Error", 
         405: 'Method Not Allowed',
         400: 'Bad Request',
-        401:'Unauthorized'
+        401: 'Unauthorized'
     }
+
     def __init__(self, status_code, extra_headers=None, body='') -> None:
+        """
+        Initializes an HTTPResponse object with a status code, optional extra headers, and a response body.
         
-        self.response_line = self.create_response_line(status_code)
-        self.response_headers = self.create_response_headers(extra_headers, body)
-        self.response_body = self.create_response_body(body=body)
-    
+        Args:
+            status_code (int): The HTTP status code for the response.
+            extra_headers (dict, optional): Additional headers to include in the response.
+            body (str, optional): The response body content (default is an empty string).
+        """
+        self.response_line = self.create_response_line(status_code)  # Create the response line (HTTP/1.1 <status_code> <reason>)
+        self.response_headers = self.create_response_headers(extra_headers, body)  # Create the headers for the response
+        self.response_body = self.create_response_body(body=body)  # Store the response body
+
     def create_response_line(self, status_code):
-        """Returns response line-> always a single line with specific format"""
+        """
+        Creates the HTTP response line in the format: "HTTP/1.1 <status_code> <reason_phrase>\r\n".
+        
+        Args:
+            status_code (int): The HTTP status code.
+        
+        Returns:
+            str: The response line formatted with the status code and its corresponding reason phrase.
+        """
         try:
+            # Fetch the reason phrase based on the status code
             reason = self.status_codes[status_code]
             line = "HTTP/1.1 %s %s\r\n" % (status_code, reason)
         except KeyError:
+            # If the status code is invalid, default to 400 (Bad Request)
             status_code = 400
             reason = self.status_codes[status_code]
             line = "HTTP/1.1 %s %s\r\n" % (status_code, reason)
         return line
-    
+
     def create_response_headers(self, extra_headers=None, body=''):
-        """Create the headers to be sent back to the client as a part of the response"""
+        """
+        Creates the HTTP response headers including server information, content length, and any extra headers.
+        
+        Args:
+            extra_headers (dict, optional): Additional headers to include in the response.
+            body (str): The body content for calculating content length.
+        
+        Returns:
+            str: The formatted HTTP response headers.
+        """
+        # Create default headers, including the server's hostname
         headers = {
-            'Server': socket.gethostname()
+            'Server': socket.gethostname()  # Get the server's hostname for the 'Server' header
         }
-        headers_copy = headers # make a local copy of headers
+        
+        # Copy headers and add the 'Content-Length' header based on the body size
+        headers_copy = headers
         headers_copy['Content-Length'] = len(body)
 
+        # If there are extra headers, update the copy with additional headers
         if extra_headers:
             headers_copy.update(extra_headers.items())
 
+        # Build the headers as a string in HTTP format
         headers = ""
-
         for h in headers_copy:
             headers += "%s: %s\r\n" % (h, headers_copy[h])
 
         return headers
-    
+
     def create_response_body(self, body):
+        """
+        Creates the response body content.
+        
+        Args:
+            body (str): The body content to be included in the HTTP response.
+        
+        Returns:
+            str: The response body.
+        """
         return body
 
     def to_http(self):
-        """Concatenate the strings and encode them in bytes since we need to send bytes and not strings"""
+        """
+        Converts the entire HTTP response (line, headers, body) into a single byte-encoded string.
+        
+        Returns:
+            bytes: The HTTP response encoded in bytes, ready to be sent over a socket.
+        """
+        # Encode the response line and headers
         response_line = self.response_line.encode()
         response_headers = self.response_headers.encode()
+
+        # A blank line to separate headers from the body
         blank_line = b"\r\n"
+
+        # Encode the response body
         response_body = self.response_body.encode()
+
+        # Concatenate everything and return it as a byte string
         return b"".join([response_line, response_headers, blank_line, response_body])
     
 class SessionManager:
@@ -393,30 +511,13 @@ class TokenManager:
         if username in self.TOKENS:
             del self.TOKENS[username]
 
-
 class HTTPServer(TCPServer):
-    registered_routes = [ ]
     def __init__(self, port=8080) -> None:
         super().__init__(port)
         self.router = Router()
         self.session_manager = SessionManager()
         self.SECRET_KEY = "my-secret-key"
         self.token_manager = TokenManager()
-        
-    # TODO: the following two functions are now decorators for your app
-    def add_route(self, methods, path):
-        """Decorator for adding routes."""
-        def decorator(func):
-            for method in methods:
-                HTTPServer.registered_routes.append((method, path, func))
-            return func
-        return decorator
-
-    # TODO: A decorator for your apps
-    def register_routes(self):
-        """Register all collected routes before starting the server."""
-        for method, path, handler in HTTPServer.registered_routes:
-            self.router.add_route(method, path, handler)
 
     def handle_request(self, data):
         request = self.create_request(data.decode())

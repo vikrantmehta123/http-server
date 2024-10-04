@@ -19,6 +19,33 @@ This project is a basic implementation of an HTTP server from scratch. It suppor
   - `405 Method Not Allowed`
   - `400 Bad Request`
 
+- **Supports Multithreading**: The server can handle upto five concurrent requests.
+
+If you wish, you could extend the server by adding some custom routes. You only need to define a couple of decorator functions to enable this:
+
+```
+def add_route(self, methods, path):
+    """Decorator for adding routes."""
+    def decorator(func):
+        for method in methods:
+            HTTPServer.registered_routes.append((method, path, func))
+        return func
+    return decorator
+
+def register_routes(self):
+    """Register all collected routes before starting the server."""
+    for method, path, handler in HTTPServer.registered_routes:
+        self.router.add_route(method, path, handler)
+```
+
+Paste the above code in the HTTP server class. Then you can define your own functions wrapped in the decorator much like in Flask. ( You also need to add a `registered_routes` attribtute which will be the list of all registered routes that your server can serve. ) Below is an example:
+
+```
+@server.add_route(['POST'], '/login')
+def handle_login(request:HTTPRequest) -> HTTPResponse:
+  pass
+```
+
 ## Credits
 
 1. [Bharat Chauhan Blog](https://bhch.github.io/posts/2017/11/writing-an-http-server-from-scratch/)
